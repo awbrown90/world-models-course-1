@@ -68,7 +68,15 @@ class PlatformerEnv:
 
 
 class PongEnv:
-    def __init__(self, height=64, width=80, ball_size=5, paddle_height=16, paddle_width=4):
+    def __init__(
+        self,
+        height=64,
+        width=80,
+        ball_size=5,
+        paddle_height=16,
+        paddle_width=4,
+        miss_behavior="tile",  # "tile" or "respawn"
+    ):
         self.height = height
         self.width = width
         self.ball_size = ball_size
@@ -76,14 +84,27 @@ class PongEnv:
         self.paddle_width = paddle_width
         self.speed = 2
         self.num_actions = 3  # up, down, stay
+
+        if miss_behavior not in ("tile", "respawn"):
+            raise ValueError("miss_behavior must be 'tile' or 'respawn'")
+        self.miss_behavior = miss_behavior
+
         self.reset()
+
+    def _spawn_ball_random(self, force_right_to_left=False):
+        self.ball_x = self.width // 2
+        self.ball_y = np.random.randint(0, self.height - self.ball_size + 1)
+
+        if force_right_to_left:
+            self.vx = -self.speed
+        else:
+            self.vx = self.speed if np.random.rand() > 0.5 else -self.speed
+
+        self.vy = self.speed if np.random.rand() > 0.5 else -self.speed
 
     def reset(self):
         self.paddle_y = (self.height - self.paddle_height) // 2
-        self.ball_x = self.width // 2
-        self.ball_y = np.random.randint(0, self.height - self.ball_size)
-        self.vx = self.speed if np.random.rand() > 0.5 else -self.speed
-        self.vy = self.speed if np.random.rand() > 0.5 else -self.speed
+        self._spawn_ball_random()
         return self._get_frame()
 
     def step(self, action):
@@ -97,6 +118,7 @@ class PongEnv:
         self.ball_x += self.vx
         self.ball_y += self.vy
 
+        # Top / bottom bounce
         if self.ball_y <= 0:
             self.ball_y = 0
             self.vy = -self.vy
@@ -104,26 +126,51 @@ class PongEnv:
             self.ball_y = self.height - self.ball_size
             self.vy = -self.vy
 
+        # Right wall bounce
         if self.ball_x >= self.width - self.ball_size:
             self.ball_x = self.width - self.ball_size
             self.vx = -self.vx
 
-        if self.ball_x <= self.paddle_width:
-            if self.ball_y + self.ball_size >= self.paddle_y and self.ball_y <= self.paddle_y + self.paddle_height:
+        # Paddle collision test only while ball is moving left and overlapping paddle x-range
+        if self.vx < 0 and self.ball_x <= self.paddle_width:
+            overlaps_paddle = (
+                self.ball_y + self.ball_size >= self.paddle_y
+                and self.ball_y <= self.paddle_y + self.paddle_height
+            )
+
+            if overlaps_paddle:
                 self.ball_x = self.paddle_width
                 self.vx = -self.vx
-            else:
-                self.reset()
+
+        # If the ball has fully exited the left side, apply miss behavior
+        if self.ball_x + self.ball_size <= 0:
+            if self.miss_behavior == "tile":
+                # Preserve continuity: if ball_x is -ball_size, it reappears at width-ball_size
+                self.ball_x += self.width
+            else:  # respawn
+                self._spawn_ball_random(force_right_to_left=True)
 
         return self._get_frame()
 
     def _get_frame(self):
         frame = np.zeros((1, self.height, self.width), dtype=np.float32)
+
         py = int(self.paddle_y)
         bx = int(self.ball_x)
         by = int(self.ball_y)
+
+        # Paddle
         frame[0, py:py + self.paddle_height, 0:self.paddle_width] = 1.0
-        frame[0, by:by + self.ball_size, bx:bx + self.ball_size] = 1.0
+
+        # Ball with clipped drawing so partial off-screen positions still render correctly
+        x1 = max(0, bx)
+        x2 = min(self.width, bx + self.ball_size)
+        y1 = max(0, by)
+        y2 = min(self.height, by + self.ball_size)
+
+        if x1 < x2 and y1 < y2:
+            frame[0, y1:y2, x1:x2] = 1.0
+
         return frame
 
     def get_action(self, keys):
@@ -135,7 +182,12 @@ class PongEnv:
         return action
 
     def get_instructions(self):
-        return "Controls: 'W'=Up, 'S'=Down. Default is Stay."
+        mode_text = (
+            "Misses wrap from left edge to right edge (deterministic)."
+            if self.miss_behavior == "tile"
+            else "Misses randomly respawn the ball."
+        )
+        return f"Controls: 'W'=Up, 'S'=Down. Default is Stay. {mode_text}"
 
 
 class SpaceInvadersEnv:
