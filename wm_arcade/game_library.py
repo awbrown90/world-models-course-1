@@ -59,7 +59,7 @@ class PlatformerEnv:
             action = 0
         if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
             action = 1
-        if (keys[pygame.K_w] or keys[pygame.K_UP]) and self.on_ground:
+        if (keys[pygame.K_w] or keys[pygame.K_UP]):
             action = 3
         return action
 
@@ -477,10 +477,146 @@ class SpaceInvadersEnv:
     def get_instructions(self):
         return "Controls: 'A/D'=Move, 'SPACE'=Shoot. You can move and shoot together."
 
+class Platformer2Env:
+    def __init__(self, height=64, width=80, ball_size=5):
+        self.height = height
+        self.width = width
+        self.ball_size = ball_size
+        self.num_actions = 4  # left, right, stay, jump
+
+        self.move_speed = 2
+        self.jump_speed = -8
+        self.gravity = 1
+        self.max_fall = 4
+
+        self.platform_h = 3
+        self.platforms = [
+            (12, self.height - 18, 16, self.platform_h),  # low
+            (32, self.height - 32, 16, self.platform_h),  # medium
+            (52, self.height - 46, 16, self.platform_h),  # high
+        ]
+
+        self.reset()
+
+    def reset(self):
+        self.x = 4
+        self.y = self.height - self.ball_size
+        self.vx = 0
+        self.vy = 0
+        self.on_ground = True
+        return self._get_frame()
+
+    def _rect_overlap(self, ax, ay, aw, ah, bx, by, bw, bh):
+        return (
+            ax < bx + bw and
+            ax + aw > bx and
+            ay < by + bh and
+            ay + ah > by
+        )
+
+    def step(self, action):
+        prev_x = self.x
+        prev_y = self.y
+
+        if action == 0:
+            self.vx = -self.move_speed
+        elif action == 1:
+            self.vx = self.move_speed
+        elif action == 2:
+            self.vx = 0
+
+        if action == 3 and self.on_ground:
+            self.vy = self.jump_speed
+            self.on_ground = False
+
+        self.vy = min(self.vy + self.gravity, self.max_fall)
+
+        # Horizontal move
+        self.x += self.vx
+
+        if self.x < 0:
+            self.x = 0
+        elif self.x > self.width - self.ball_size:
+            self.x = self.width - self.ball_size
+
+        for px, py, pw, ph in self.platforms:
+            if self._rect_overlap(self.x, prev_y, self.ball_size, self.ball_size, px, py, pw, ph):
+                if self.vx > 0 and prev_x + self.ball_size <= px:
+                    self.x = px - self.ball_size
+                elif self.vx < 0 and prev_x >= px + pw:
+                    self.x = px + pw
+
+        # Vertical move
+        self.y += self.vy
+        self.on_ground = False
+
+        # Ceiling collision
+        if self.y < 0:
+            self.y = 0
+            self.vy = 0
+
+        # Floor collision
+        if self.y >= self.height - self.ball_size:
+            self.y = self.height - self.ball_size
+            self.vy = 0
+            self.on_ground = True
+
+        for px, py, pw, ph in self.platforms:
+            if self._rect_overlap(self.x, self.y, self.ball_size, self.ball_size, px, py, pw, ph):
+                # Landing on top
+                if self.vy >= 0 and prev_y + self.ball_size <= py:
+                    self.y = py - self.ball_size
+                    self.vy = 0
+                    self.on_ground = True
+                # Hitting underside
+                elif self.vy < 0 and prev_y >= py + ph:
+                    self.y = py + ph
+                    self.vy = 0
+
+        return self._get_frame()
+
+    def _get_frame(self):
+        frame = np.zeros((1, self.height, self.width), dtype=np.float32)
+
+        # Draw platforms
+        for px, py, pw, ph in self.platforms:
+            x1 = max(0, px)
+            x2 = min(self.width, px + pw)
+            y1 = max(0, py)
+            y2 = min(self.height, py + ph)
+            if x1 < x2 and y1 < y2:
+                frame[0, y1:y2, x1:x2] = 1.0
+
+        # Draw player with clipping so negative coords don't wrap
+        x0 = int(self.x)
+        y0 = int(self.y)
+        x1 = max(0, x0)
+        x2 = min(self.width, x0 + self.ball_size)
+        y1 = max(0, y0)
+        y2 = min(self.height, y0 + self.ball_size)
+
+        if x1 < x2 and y1 < y2:
+            frame[0, y1:y2, x1:x2] = 1.0
+
+        return frame
+
+    def get_action(self, keys):
+        action = 2  # stay
+        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+            action = 0
+        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+            action = 1
+        if (keys[pygame.K_w] or keys[pygame.K_UP]):
+            action = 3
+        return action
+
+    def get_instructions(self):
+        return "Controls: 'W'=Jump, 'A'=Left, 'D'=Right. Three platforms form a low->medium->high staircase. Ceiling is solid."
 
 # The Arcade Registry
 ENV_REGISTRY = {
     "platformer": PlatformerEnv,
+    "platformer2": Platformer2Env,
     "pong": PongEnv,
     "space_invaders": SpaceInvadersEnv,
 }

@@ -4,8 +4,12 @@ Train a simple world model in minutes!
 `python interactive_vqvae.py --env platformer`
 
 2. Run the interactive world model, that uses the trained above encoder, should converge and match gt sim within 5-8 minutes
+Use `spacebar` to prime the world model with gt observations
 `python interactive_wm.py --env platformer`
 
 Try other more complex games like pong, should also converge quickly, a couple more minutes longer than platformer
 `python interactive_vqvae.py --env pong`
 `python interactive_wm.py --env pong`
+
+`python interactive_vqvae.py --env platformer2`
+`python interactive_wm.py --env platformer2`
